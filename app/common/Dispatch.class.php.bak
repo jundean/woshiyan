@@ -1,0 +1,147 @@
+<?PHP
+
+/**
+ * @Copyright (c) 2011 Ganji Inc.
+ * @file          /ganji_v5/app/common/Dispatch.class.php
+ * @author        longweiguo@ganji.com
+ * @date          2011-03-29
+ *
+ * 流程分发
+ */
+
+/**
+ * @class: Dispatch
+ * 流程分发类
+ * 所有用户的访问都是通过此类进行分发到app下不同目录下的PageBase派生类的*Action()方法执行
+ */
+class Dispatch {
+    /// 表示频道的$_REQUEST参数名，即app下的某目录名
+    const CHANNEL_NAME = 'vchannel';
+    /// 表示模块的$_REQUEST参数名，$_REQUEST['vmodule'] . 'Page'即类名，对应的文件名是：类名.class.php
+    const MODULE_NAME = 'vmodule';
+    /// 表示要执行的方法的$_REQUEST参数名，$_REQUEST['vaction'] . 'Action'即方法名
+    const ACTION_NAME = 'vaction';
+
+    const VERSION_NAME = 'vversion'; //版本号用于多版本程序共用
+
+    const AJAX_NAME = 'vajax';
+
+    const IFRAME_NAME = 'viframe';
+
+    public static $currentPageMode;
+
+    private $channelPath;
+
+    private $filePath;
+
+    private $className;
+
+    /// 执行分发
+    /// @param[in] string channel 频道名
+    /// @param[in] string module 模块名
+    /// @param[in] string action 执行的动作名
+    /// @param[in] array  cumtomParams 自定义参数
+    /// @param[in] string pageMode 页面模式
+    public static function run($channel = "", $module = "", $action = "", $cumtomParams = array(), $pageMode = '') {
+        new Dispatch($channel, $module, $action, $cumtomParams, $pageMode);
+    }
+
+    public function __construct($channel = "", $module = "", $action = "", $cumtomParams = array(), $pageMode = '') {
+        PageBase::$PAGE_MODE = $this->getPageMode($pageMode);
+
+        $this->setChannel($channel);
+        $this->setModule($module);
+        $className = $this->className;
+
+        if (empty($action)) {
+            $action = HttpNamespace::getREQUEST(self::ACTION_NAME, PageBase::PAGE_MODE_DEFAULT);
+        }
+
+        try {
+            include_once $this->filePath;
+            $obj = new $className(PageBase::$PAGE_MODE);
+
+            if (method_exists($obj, 'setCustomParams')) {
+                $obj->setCustomParams($cumtomParams);
+            }
+
+            if (method_exists($obj, 'init')) {
+                $obj->init();
+            }
+
+            $action .= "Action";
+            if (method_exists($obj, $action)) {
+                $obj->$action();
+            }
+
+        //$obj->render();
+        }
+        catch (Exception $e) {
+            Logger::logError(sprintf('Exception in Dispatch.class.php! errstr=%s, getTraceAsString=%s', 
+                    $e->getMessage(), $e->getTraceAsString()), 'user_error_parse');
+            throw new Exception($e->getMessage());
+           // trigger_error($e->getMessage(), E_USER_ERROR);
+        }
+    }
+
+    private function setChannel($channel = "") {
+        if (empty($channel)) {
+            $channel = HttpNamespace::getREQUEST(self::CHANNEL_NAME, '');
+        }
+        if (empty($channel)) {
+            trigger_error("未指定" . self::CHANNEL_NAME, E_USER_ERROR);
+        }
+        $channelPath = GANJI_V5 . "/app/" . $channel;
+        if (!is_dir($channelPath)) {
+            trigger_error("目录{$channel}不存在", E_USER_ERROR);
+        }
+
+        $this->channelPath = $channelPath;
+    }
+
+    private function setModule($module = "") {
+        if (empty($module)) {
+            $module = HttpNamespace::getREQUEST(self::MODULE_NAME, '');
+        }
+        if (empty($module)) {
+            trigger_error("未指定" . self::MODULE_NAME, E_USER_ERROR);
+        }
+        $className = $this->getClassName($module);
+        $filePath = $this->channelPath . "/" . $className . ".class.php";
+        if (!file_exists($filePath)) {
+            $error = basename($filePath);
+            trigger_error("文件{$error}不存在", E_USER_ERROR);
+        }
+        $this->className = $className;
+        $this->filePath = $filePath;
+    }
+
+    private function getClassName($module) {
+        if (strpos($module, '_') === false)
+            return ucfirst($module) . "Page";
+
+        $modules = explode("_", $module);
+        $str = '';
+        foreach ($modules as $module) {
+            $str .= ucfirst($module);
+        }
+        return $str . "Page";
+    }
+
+    private function getPageMode($pageMode = '') {
+        if (HttpNamespace::getREQUEST(self::AJAX_NAME)) {
+            return PageBase::PAGE_MODE_AJAX;
+        }
+
+        if (HttpNamespace::getREQUEST(self::IFRAME_NAME)) {
+            return PageBase::PAGE_MODE_IFRAME;
+        }
+
+        if (!empty($pageMode) && ($pageMode == PageBase::PAGE_MODE_DEFAULT || $pageMode == PageBase::PAGE_MODE_AJAX || $pageMode == PageBase::PAGE_MODE_IFRAME)) {
+            return $pageMode;
+        }
+
+        return PageBase::PAGE_MODE_DEFAULT;
+    }
+
+}
